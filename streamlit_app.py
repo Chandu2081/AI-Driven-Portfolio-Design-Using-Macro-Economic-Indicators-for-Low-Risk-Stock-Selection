@@ -1,132 +1,133 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
 import seaborn as sns
+import matplotlib.pyplot as plt
 
-from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_absolute_percentage_error, mean_absolute_error, mean_squared_error
-from statsmodels.stats.outliers_influence import variance_inflation_factor
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.linear_model import BayesianRidge, LassoCV, RidgeCV
+from sklearn.metrics import mean_absolute_percentage_error
+
 from statsmodels.api import add_constant
+from statsmodels.stats.outliers_influence import variance_inflation_factor
 
+st.title("📌 Feature Selection → VIF → Multiple Models Evaluation Dashboard")
 
-st.title("📊 AI Portfolio Analytics Dashboard")
-st.write("Upload dataset → Select stock → View correlation, VIF, regression fit, scatter plots & accuracy.")
-
-# =====================================
-# 1. UPLOAD FILE
-# =====================================
 uploaded_file = st.file_uploader("📤 Upload your CSV file", type=["csv"])
 
 if uploaded_file:
     df = pd.read_csv(uploaded_file)
     df = df.rename(columns=lambda x: x.strip())
-
-    # Fill missing values
-    df = df.fillna(method='ffill')
-    df = df.fillna(0)
+    df = df.fillna(method='ffill').fillna(0)
 
     st.subheader("🔍 Data Preview")
     st.write(df.head())
 
-    columns = df.columns[1:]  # skip Date column
-    target_stock = st.selectbox("🎯 Select stock to analyze", columns)
+    columns = df.columns[1:]  # skip date or index col
+    target = st.selectbox("🎯 Select target stock", columns)
 
-    # =====================================
-    # 2. CORRELATION HEATMAP
-    # =====================================
-    st.subheader("📈 Correlation Heatmap")
+    # =============================
+    # RANDOM FOREST FEATURE IMPORTANCE
+    # =============================
+    st.subheader("🌲 Step 1 — Random Forest Feature Importance")
 
+    X = df[columns].select_dtypes(include=[np.number]).drop(columns=[target], errors='ignore')
+    y = df[target]
+
+    rf = RandomForestRegressor(n_estimators=300, random_state=42)
+    rf.fit(X, y)
+
+    importance = pd.DataFrame({
+        'Feature': X.columns,
+        'Importance': rf.feature_importances_
+    }).sort_values(by='Importance', ascending=False)
+
+    st.write("📌 Top 30 most important variables")
+    st.dataframe(importance.head(30))
+
+    top_features = importance.head(30)['Feature'].tolist()
+
+    # =============================
+    # VIF ON TOP FEATURES
+    # =============================
+    st.subheader("🧮 Step 2 — VIF Filtering")
+
+    X_top = df[top_features]
+    X_vif_const = add_constant(X_top)
+
+    vif_df = pd.DataFrame()
+    vif_df["Feature"] = X_vif_const.columns
+    vif_df["VIF"] = [variance_inflation_factor(X_vif_const.values, i) 
+                      for i in range(X_vif_const.shape[1])]
+    st.write(vif_df)
+
+    vif_cutoff = st.slider("VIF cutoff", 2.0, 20.0, 10.0)
+    selected = vif_df[vif_df["VIF"] < vif_cutoff]["Feature"].tolist()
+
+    if 'const' in selected:
+        selected.remove('const')
+
+    st.success(f"Using {len(selected)} features after VIF filtering")
+
+    X_features = df[selected]
+
+    # =============================
+    # HEATMAP AFTER FEATURE SELECTION
+    # =============================
+    st.subheader("🌡 Step 3 — Correlation Heatmap (Selected Variables)")
     fig, ax = plt.subplots(figsize=(10, 6))
-    sns.heatmap(df[columns].corr(), cmap="coolwarm", ax=ax)
+    sns.heatmap(X_features.corr(), cmap="coolwarm", ax=ax)
     st.pyplot(fig)
 
-    # =====================================
-    # 3. VIF CALCULATION
-    # =====================================
-    st.subheader("🧮 Variance Inflation Factor (VIF)")
-    numeric_df = df[columns].select_dtypes(include=[np.number])
+    # =============================
+    # TRAIN-TEST SPLIT
+    # =============================
+    split = int(len(df) * 0.9)
+    X_train = X_features.iloc[:split]
+    X_test = X_features.iloc[split:]
+    y_train = y.iloc[:split]
+    y_test = y.iloc[split:]
 
-    numeric_sample = numeric_df.iloc[:, :10]  # take first 10 to control runtime
-    X_vif = add_constant(numeric_sample)
+    # =============================
+    # SCATTER PLOTS
+    # =============================
+    st.subheader("📍 Step 4 — Scatter Plots vs Target")
+    for col in selected[:5]:   # show only first 5 to keep UI clean
+        fig2, ax2 = plt.subplots()
+        ax2.scatter(df[col], y, alpha=0.5)
+        ax2.set_xlabel(col)
+        ax2.set_ylabel(target)
+        st.pyplot(fig2)
 
-    vif_data = pd.DataFrame()
-    vif_data["Feature"] = X_vif.columns
-    vif_data["VIF"] = [variance_inflation_factor(X_vif.values, i) for i in range(X_vif.shape[1])]
-    st.write(vif_data)
+    # =============================
+    # MODELS TO TEST
+    # =============================
+    st.subheader("🤖 Step 5 — Model Training + MAPE Comparison")
 
-    # =====================================
-    # 4. BUILD TIME INDEX & TRAIN
-    # =====================================
-    df['index'] = np.arange(len(df))
+    models = {
+        "Bayesian Ridge": BayesianRidge(),
+        "LassoCV": LassoCV(cv=5, random_state=42),
+        "RidgeCV": RidgeCV(cv=5),
+        "RandomForestRegressor": RandomForestRegressor(n_estimators=300, random_state=42)
+    }
 
-    train_size = int(len(df) * 0.9)
-    train = df.iloc[:train_size]
-    test = df.iloc[train_size:]
+    results = []
+    for name, model in models.items():
+        model.fit(X_train, y_train)
+        train_pred = model.predict(X_train)
+        test_pred = model.predict(X_test)
 
-    X_train = train[['index']]
-    y_train = train[target_stock]
-    X_test = test[['index']]
-    y_test = test[target_stock]
+        train_mape = mean_absolute_percentage_error(y_train, train_pred) * 100
+        test_mape = mean_absolute_percentage_error(y_test, test_pred) * 100
 
-    model = LinearRegression()
-    model.fit(X_train, y_train)
-    predictions = model.predict(X_test)
+        results.append([name, round(train_mape,2), round(test_mape,2)])
 
-    # =====================================
-    # 5. METRICS
-    # =====================================
-    mae = mean_absolute_error(y_test, predictions)
-    mape = mean_absolute_percentage_error(y_test, predictions) * 100
-    mse = mean_squared_error(y_test, predictions)
+    perf_df = pd.DataFrame(results, columns=["Model", "Train MAPE %", "Test MAPE %"])
+    st.dataframe(perf_df)
 
-    st.subheader("📊 Model Accuracy Metrics")
-    st.write(f"**MAE:** {mae:.3f}")
-    st.write(f"**MAPE:** {mape:.2f}%")
-    st.write(f"**MSE:** {mse:.3f}")
-
-    # =====================================
-    # 6. REGRESSION EQUATION
-    # =====================================
-    slope = model.coef_[0]
-    intercept = model.intercept_
-    st.subheader("🧾 Regression Equation")
-    st.write(f"**y = {slope:.4f} × index + {intercept:.4f}**")
-
-    # =====================================
-    # 7. LINE CHART (Actual vs Predicted)
-    # =====================================
-    st.subheader("📊 Actual vs Predicted Curve")
-    pred_series = np.concatenate([np.repeat(np.nan, len(train)), predictions])
-    chart_df = pd.DataFrame({"Actual": df[target_stock], "Predicted": pred_series})
-    st.line_chart(chart_df)
-
-    # =====================================
-    # 8. SCATTER PLOT WITH REGRESSION LINE
-    # =====================================
-    st.subheader("📉 Scatter Plot With Regression Line (Train Data)")
-
-    fig2, ax2 = plt.subplots(figsize=(8,4))
-    ax2.scatter(train['index'], y_train, color='blue', label="Actual")
-    ax2.plot(train['index'], model.predict(X_train), color='red', label=f"Fit Line")
-    ax2.set_xlabel("Time Index")
-    ax2.set_ylabel(target_stock)
-    ax2.legend()
-    st.pyplot(fig2)
-
-    # =====================================
-    # 9. SCATTER PLOT TEST SECTION
-    # =====================================
-    st.subheader("📍 Scatter Plot on Test Data")
-
-    fig3, ax3 = plt.subplots(figsize=(8,4))
-    ax3.scatter(test['index'], y_test, color='green', label="Actual Test")
-    ax3.plot(test['index'], predictions, color='orange', label="Predicted Line")
-    ax3.set_xlabel("Time Index (Test)")
-    ax3.set_ylabel(target_stock)
-    ax3.legend()
-    st.pyplot(fig3)
+    # Show best model
+    best = perf_df.loc[perf_df["Test MAPE %"].idxmin()]
+    st.success(f"🏆 Best model: {best['Model']} with Test MAPE = {best['Test MAPE %']}%")
 
 else:
-    st.info("👆 Upload a CSV file to start analysis.")
-
+    st.info("👆 Upload a CSV to begin.")
