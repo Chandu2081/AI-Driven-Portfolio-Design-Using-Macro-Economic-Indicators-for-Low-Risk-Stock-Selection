@@ -9,7 +9,6 @@ from sklearn.metrics import mean_absolute_percentage_error, mean_absolute_error,
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 from statsmodels.api import add_constant
 
-st.set_option('deprecation.showPyplotGlobalUse', False)
 
 st.title("📊 AI Portfolio Analytics Dashboard")
 st.write("Upload dataset → Select stock → View correlation, VIF, regression fit, scatter plots & accuracy.")
@@ -130,3 +129,4 @@ if uploaded_file:
 
 else:
     st.info("👆 Upload a CSV file to start analysis.")
+
