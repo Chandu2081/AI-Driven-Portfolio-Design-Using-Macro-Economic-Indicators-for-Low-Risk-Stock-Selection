@@ -10,25 +10,27 @@ from sklearn.metrics import mean_absolute_percentage_error
 from statsmodels.api import OLS, add_constant
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 
-st.title("✨ Best Model Selection → Auto P-value Filter → Future Forecast")
+st.title("✨ Auto Feature Selection → OLS → Forecast Dashboard")
 
 uploaded_file = st.file_uploader("📤 Upload CSV file", type=["csv"])
 
 if uploaded_file:
+    # LOAD DATA
     df = pd.read_csv(uploaded_file)
     df = df.rename(columns=lambda x: x.strip())
     df = df.fillna(method='ffill').fillna(0)
 
     date_col = df.columns[0]
     columns = df.columns[1:]
+
     st.subheader("🔍 Data Preview")
     st.write(df.head())
 
     target = st.selectbox("🎯 Select target stock", columns)
 
-    # =======================
     # STEP 1 — FEATURE IMPORTANCE
-    # =======================
+    st.subheader("🌲 Step 1 — Random Forest Feature Ranking")
+
     X = df[columns].select_dtypes(include=[np.number]).drop(columns=[target], errors='ignore')
     y = df[target]
 
@@ -36,49 +38,44 @@ if uploaded_file:
     rf.fit(X, y)
 
     importance = pd.DataFrame({
-        'Feature': X.columns,
-        'Importance': rf.feature_importances_
-    }).sort_values(by='Importance', ascending=False)
+        "Feature": X.columns,
+        "Importance": rf.feature_importances_
+    }).sort_values(by="Importance", ascending=False)
 
-    st.subheader("🌲 Random Forest Feature Importance (Top 30)")
+    st.write("📌 Top 30 most important variables")
     st.dataframe(importance.head(30))
 
     top_features = importance.head(30)['Feature'].tolist()
 
-    # =======================
-    # STEP 2 — VIF FILTERING
-    # =======================
-    st.subheader("🧮 VIF Filtering")
-    vif_df = pd.DataFrame()
-    X_vif = add_constant(df[top_features])
+    # STEP 2 — VIF FILTER
+    st.subheader("🧮 Step 2 — VIF Filter")
 
-    vif_df["Feature"] = X_vif.columns
-    vif_df["VIF"] = [variance_inflation_factor(X_vif.values, i)
-                     for i in range(X_vif.shape[1])]
-    st.dataframe(vif_df)
+    X_vif_raw = add_constant(df[top_features])
+    vif_df = pd.DataFrame()
+    vif_df["Feature"] = X_vif_raw.columns
+    vif_df["VIF"] = [variance_inflation_factor(X_vif_raw.values, i) 
+                      for i in range(X_vif_raw.shape[1])]
+    st.write(vif_df)
 
     vif_cutoff = st.slider("VIF cutoff", 2.0, 20.0, 10.0)
     selected = vif_df[vif_df["VIF"] < vif_cutoff]["Feature"].tolist()
-    if 'const' in selected:
-        selected.remove('const')
 
-    st.success(f"Selected {len(selected)} features after VIF")
+    if "const" in selected:
+        selected.remove("const")
+
+    st.success(f"✔ {len(selected)} features kept after VIF filtering")
 
     X_features = df[selected]
 
-    # =======================
     # STEP 3 — TRAIN-TEST SPLIT
-    # =======================
     split = int(len(df) * 0.9)
     X_train = X_features.iloc[:split]
     X_test = X_features.iloc[split:]
     y_train = y.iloc[:split]
     y_test = y.iloc[split:]
 
-    # =======================
-    # STEP 4 — COMPARE MODELS
-    # =======================
-    st.subheader("🤖 Model Comparison (Train vs Test MAPE)")
+    # STEP 4 — MODEL COMPARISON
+    st.subheader("🤖 Step 3 — Compare Models (Train vs Test MAPE)")
 
     models = {
         "Bayesian Ridge": BayesianRidge(),
@@ -88,9 +85,8 @@ if uploaded_file:
     }
 
     results = []
-    best_name = None
-    best_test = 1e9
-    best_model = None
+    best_model_name = None
+    best_test_mape = 1e9
 
     for name, model in models.items():
         model.fit(X_train, y_train)
@@ -102,94 +98,62 @@ if uploaded_file:
 
         results.append([name, round(train_mape,2), round(test_mape,2)])
 
-        if test_mape < best_test:
-            best_test = test_mape
-            best_name = name
-            best_model = model
+        if test_mape < best_test_mape:
+            best_test_mape = test_mape
+            best_model_name = name
 
-    perf_df = pd.DataFrame(results, columns=["Model", "Train MAPE %", "Test MAPE %"])
+    perf_df = pd.DataFrame(results, columns=["Model","Train MAPE %","Test MAPE %"])
     st.dataframe(perf_df)
-    st.success(f"🏆 Best model selected: {best_name}")
+    st.success(f"🏆 Best model selected: {best_model_name}")
 
-    # =======================
-    # STEP 5 — FINAL OLS WITH AUTO P-VALUE FILTER
-    # =======================
-    st.subheader("🧾 Final OLS Regression (Auto Drop p > 0.05)")
+    # STEP 5 — FINAL OLS & AUTO DROP p>0.05
+    st.subheader("🧾 Step 4 — OLS Regression (p < 0.05 only)")
+
     X_reg = add_constant(X_features)
-    ols_model = OLS(y, X_reg).fit()
+    ols = OLS(y, X_reg).fit()
 
-    pvals = ols_model.pvalues.drop("const", errors='ignore')
+    pvals = ols.pvalues.drop("const", errors='ignore')
     sig_features = pvals[pvals < 0.05].index.tolist()
 
-    st.write("📌 Significant variables (p < 0.05):")
-    st.write(sig_features)
+    if len(sig_features) == 0:
+        st.error("❌ No variables significant at p < 0.05")
+    else:
+        st.write("✔ Significant variables:", sig_features)
 
-    X_final = add_constant(df[sig_features])
-    final_ols = OLS(y, X_final).fit()
-    st.write(final_ols.summary())
+        X_final = add_constant(df[sig_features])
+        final_ols = OLS(y, X_final).fit()
+        st.write(final_ols.summary())
 
-    # =======================
-    # STEP 6 — In-sample fitted
-    # =======================
-    fitted = final_ols.predict(X_final)
+        fitted = final_ols.predict(X_final)
 
-    # =======================
-    # STEP 7 — FUTURE FORECAST
-    # =======================
-    st.subheader("🔮 Forecast Future Points")
+        # STEP 6 — FUTURE FORECAST
+        st.subheader("🔮 Step 5 — Forecast")
 
-    future_steps = st.slider("Forecast periods ahead:", 1, 24, 6)
-    # =======================
-# STEP 7 — FUTURE FORECAST (SAFE VERSION)
-# =======================
-st.subheader("🔮 Forecast Future Points")
+        future_steps = st.slider("Periods ahead:", 1, 24, 6)
+        last_row = df[sig_features].iloc[-1:].copy()
 
-future_steps = st.slider("Forecast periods ahead:", 1, 24, 6)
+        forecasts = []
+        for i in range(future_steps):
+            future_in = add_constant(last_row, has_constant='add')
+            pred = final_ols.predict(future_in)[0]
+            forecasts.append(pred)
 
-# Last known values of sig variables
-last_row = df[sig_features].iloc[-1].copy()
+        last_date = pd.to_datetime(df[date_col].iloc[-1])
+        future_dates = pd.date_range(start=last_date, periods=future_steps+1, closed='right')
 
-# Make DataFrame matching X_final columns (including const)
-forecast_input = pd.DataFrame([last_row])
-forecast_input = add_constant(forecast_input, has_constant='add')
+        forecast_df = pd.DataFrame({"Date": future_dates, "Predicted": forecasts})
 
-forecasts = []
+        # STEP 7 — CHART
+        st.subheader("📈 Final: Actual + Fitted + Forecast")
 
-for i in range(future_steps):
-    pred = final_ols.predict(forecast_input)[0]
-    forecasts.append(pred)
-    # Update value for next step (naïve forecast propagation)
-    forecast_input.iloc[0, 1:] = forecast_input.iloc[0, 1:]
+        chart_df = pd.DataFrame({
+            "Date": df[date_col],
+            "Actual": y,
+            "Fitted": fitted
+        }).set_index("Date")
 
-# Future dates
-last_date = pd.to_datetime(df[date_col].iloc[-1])
-future_dates = pd.date_range(start=last_date, periods=future_steps+1, closed='right')
-
-forecast_df = pd.DataFrame({"Date": future_dates, "Predicted": forecasts})
-
-
-    last_dates = pd.date_range(start=pd.to_datetime(df[date_col].iloc[-1]), periods=future_steps+1, closed='right')
-
-    forecast_df = pd.DataFrame({"Date": last_dates, "Predicted": forecasts})
-
-    # =======================
-    # STEP 8 — CHART
-    # =======================
-    st.subheader("📈 Actual + Fitted + Forecast vs Date")
-
-    chart_df = pd.DataFrame({
-        "Date": df[date_col],
-        "Actual": y,
-        "Fitted": fitted
-    })
-
-    chart_df.set_index("Date", inplace=True)
-
-    st.line_chart(chart_df)
-
-    st.write("📌 Future Forecast")
-    st.line_chart(forecast_df.set_index("Date"))
+        st.line_chart(chart_df)
+        st.line_chart(forecast_df.set_index("Date"))
 
 else:
-    st.info("👆 Upload a CSV to begin")
-
+    st.info("👆 Upload CSV to begin")
