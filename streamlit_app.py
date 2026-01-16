@@ -139,13 +139,34 @@ if uploaded_file:
     st.subheader("🔮 Forecast Future Points")
 
     future_steps = st.slider("Forecast periods ahead:", 1, 24, 6)
-    future_df = df[sig_features].iloc[-1:].copy()
+    # =======================
+# STEP 7 — FUTURE FORECAST (SAFE VERSION)
+# =======================
+st.subheader("🔮 Forecast Future Points")
 
-    forecasts = []
-    for _ in range(future_steps):
-        pred = final_ols.predict(add_constant(future_df))[0]
-        forecasts.append(pred)
-        future_df = future_df.copy()
+future_steps = st.slider("Forecast periods ahead:", 1, 24, 6)
+
+# Last known values of sig variables
+last_row = df[sig_features].iloc[-1].copy()
+
+# Make DataFrame matching X_final columns (including const)
+forecast_input = pd.DataFrame([last_row])
+forecast_input = add_constant(forecast_input, has_constant='add')
+
+forecasts = []
+
+for i in range(future_steps):
+    pred = final_ols.predict(forecast_input)[0]
+    forecasts.append(pred)
+    # Update value for next step (naïve forecast propagation)
+    forecast_input.iloc[0, 1:] = forecast_input.iloc[0, 1:]
+
+# Future dates
+last_date = pd.to_datetime(df[date_col].iloc[-1])
+future_dates = pd.date_range(start=last_date, periods=future_steps+1, closed='right')
+
+forecast_df = pd.DataFrame({"Date": future_dates, "Predicted": forecasts})
+
 
     last_dates = pd.date_range(start=pd.to_datetime(df[date_col].iloc[-1]), periods=future_steps+1, closed='right')
 
@@ -171,3 +192,4 @@ if uploaded_file:
 
 else:
     st.info("👆 Upload a CSV to begin")
+
