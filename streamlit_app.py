@@ -76,7 +76,11 @@ if uploaded_file:
     # =============================
     st.subheader("🌡 Step 3 — Correlation Heatmap (Selected Variables)")
     fig, ax = plt.subplots(figsize=(10, 6))
-    sns.heatmap(X_features.corr(), cmap="coolwarm", ax=ax)
+
+    # Fix NaN/Inf issue
+    corr = X_features.corr().replace([np.inf, -np.inf], np.nan).fillna(0)
+
+    sns.heatmap(corr, cmap="coolwarm", ax=ax)
     st.pyplot(fig)
 
     # =============================
@@ -131,3 +135,4 @@ if uploaded_file:
 
 else:
     st.info("👆 Upload a CSV to begin.")
+
