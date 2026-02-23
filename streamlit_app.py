@@ -57,7 +57,7 @@ if uploaded_file:
     X = df[columns].select_dtypes(include=[np.number]).drop(columns=[target], errors="ignore")
     y = df[target]
 
-    rf = RandomForestRegressor(n_estimators=300, random_state=42)
+    rf = RandomForestRegressor(n_estimators=100, random_state=42)
     rf.fit(X, y)
 
     importance = pd.DataFrame({
@@ -203,5 +203,6 @@ if uploaded_file:
 
 else:
     st.info("👆 Upload a CSV file to begin")
+
 
 
