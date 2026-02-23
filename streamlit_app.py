@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-Installing scikit-learn==1.3.2
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import BayesianRidge, LassoCV, RidgeCV
 from sklearn.metrics import mean_absolute_percentage_error
@@ -204,4 +203,5 @@ if uploaded_file:
 
 else:
     st.info("👆 Upload a CSV file to begin")
+
 
