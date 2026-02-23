@@ -8,4 +8,4 @@ scikit-learn==1.3.2
 statsmodels==0.14.2
 matplotlib==3.8.4
 seaborn==0.13.2
-Installing scikit-learn==1.3.2
+scikit-learn==1.3.2
