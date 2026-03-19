@@ -1,12 +1,5 @@
-streamlit
-pandas
-numpy
-scikit-learn
-statsmodels
-matplotlib
-seaborn
-altair==4.2.2
-pandas==2.3.3
+ltair==4.2.2
+pandas==2.2.2
 numpy==1.26.4
 scikit-learn==1.3.2
 streamlit==1.35.0
